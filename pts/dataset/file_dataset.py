@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Iterator, List
 from typing import NamedTuple
 
-import rapidjson as json
+import json
 
 from .common import Dataset, DataEntry, SourceContext
 from .process import ProcessDataEntry

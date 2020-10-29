@@ -19,7 +19,8 @@ from typing import Callable, List, NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
-import rapidjson as json
+# import rapidjson as json
+import json
 
 from .common import (
     MetaData,

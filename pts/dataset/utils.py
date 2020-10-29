@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import rapidjson as json
+import json
 
 from .common import TrainDatasets, MetaData
 from .file_dataset import FileDataset
