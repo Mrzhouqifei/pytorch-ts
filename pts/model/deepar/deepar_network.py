@@ -402,13 +402,15 @@ class DeepARPredictionNetwork(DeepARNetwork):
         samples = torch.cat(future_samples, dim=1)
 
         # (batch_size, num_samples, prediction_length, *target_shape)
-        return samples.reshape(
+        samples = samples.reshape(
             (
                 (-1, self.num_parallel_samples)
                 + (self.prediction_length,)
                 + self.target_shape
             )
         )
+        print(samples.shape)
+        return samples
 
     # noinspection PyMethodOverriding,PyPep8Naming
     def forward(

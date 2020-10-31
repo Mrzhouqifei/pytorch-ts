@@ -35,6 +35,8 @@ class DeepAREstimator(PTSEstimator):
         freq: str,
         prediction_length: int,
         input_size: int,
+        encoder_size: int,
+        short_period: int,
         trainer: Trainer = Trainer(),
         context_length: Optional[int] = None,
         num_layers: int = 2,
@@ -57,6 +59,8 @@ class DeepAREstimator(PTSEstimator):
         super().__init__(trainer=trainer)
 
         self.freq = freq
+        self.short_period = short_period
+
         self.context_length = (
             context_length if context_length is not None else prediction_length
         )
@@ -64,6 +68,7 @@ class DeepAREstimator(PTSEstimator):
         self.distr_output = distr_output
         self.distr_output.dtype = dtype
         self.input_size = input_size
+        self.encoder_size = encoder_size
         self.num_layers = num_layers
         self.num_cells = num_cells
         self.cell_type = cell_type
@@ -178,9 +183,11 @@ class DeepAREstimator(PTSEstimator):
     def create_training_network(self, device: torch.device) -> DeepARTrainingNetwork:
         return DeepARTrainingNetwork(
             input_size=self.input_size,
+            encoder_size=self.encoder_size,
             num_layers=self.num_layers,
             num_cells=self.num_cells,
             cell_type=self.cell_type,
+            short_period=self.short_period,
             history_length=self.history_length,
             context_length=self.context_length,
             prediction_length=self.prediction_length,
@@ -202,9 +209,11 @@ class DeepAREstimator(PTSEstimator):
         prediction_network = DeepARPredictionNetwork(
             num_parallel_samples=self.num_parallel_samples,
             input_size=self.input_size,
+            encoder_size=self.encoder_size,
             num_layers=self.num_layers,
             num_cells=self.num_cells,
             cell_type=self.cell_type,
+            short_period=self.short_period,
             history_length=self.history_length,
             context_length=self.context_length,
             prediction_length=self.prediction_length,
