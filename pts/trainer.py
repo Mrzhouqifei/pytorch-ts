@@ -4,7 +4,7 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 
@@ -36,7 +36,7 @@ class Trainer:
             net.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
         )
 
-        writer = SummaryWriter()
+        # writer = SummaryWriter()
         #writer.add_graph(net)
 
         for epoch_no in range(self.epochs):
@@ -64,17 +64,17 @@ class Trainer:
                         refresh=False,
                     )
                     n_iter = epoch_no*self.num_batches_per_epoch + batch_no
-                    writer.add_scalar('Loss/train', loss.item(), n_iter)
+                    # writer.add_scalar('Loss/train', loss.item(), n_iter)
 
                     loss.backward()
                     optimizer.step()
 
                     if self.num_batches_per_epoch == batch_no:
-                        for name, param in net.named_parameters():
-                            writer.add_histogram(name, param.clone().cpu().data.numpy(), n_iter)
+                        # for name, param in net.named_parameters():
+                        #     writer.add_histogram(name, param.clone().cpu().data.numpy(), n_iter)
                         break
 
             # mark epoch end time and log time cost of current epoch
             toc = time.time()
         
-        writer.close()
+        # writer.close()

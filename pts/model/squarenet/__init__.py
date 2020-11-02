@@ -1,2 +1,2 @@
-from .deepar_estimator import DeepAREstimator
-from .deepar_network import DeepARNetwork, DeepARTrainingNetwork
+from .squarenet_estimator import SquareNetEstimator
+from .squarenet_network import SquareNetNetwork, SquareNetTrainingNetwork

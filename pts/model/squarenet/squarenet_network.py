@@ -1,12 +1,8 @@
 from typing import List, Optional, Tuple, Union
-
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.distributions import Distribution
-
 from pts.core.component import validated
-from pts.model import weighted_average
 from pts.modules import DistributionOutput, MeanScaler, NOPScaler, FeatureEmbedder
 
 
@@ -17,38 +13,17 @@ def prod(xs):
     return p
 
 
-class LinearSelfAttnSeq(nn.Module):
-    def __init__(self, input_size):
-        super(LinearSelfAttnSeq, self).__init__()
-        self.linear = nn.Sequential(#nn.Linear(input_size, input_size),
-                                    #nn.Tanh(),
-                                    nn.Linear(input_size, input_size))
-
-    def forward(self, q):
-        """
-        x = [batch, len, hdim]
-        """
-        k = v = q
-        q = self.linear(q)
-        # 计算Q, K的矩阵乘积。 bmm或matmul都可以
-        logits = torch.div(torch.bmm(q, k.permute(0, 2, 1)), np.sqrt(q.shape[-1]))
-        # 利用softmax将结果归一化。
-        weights = nn.functional.softmax(logits, dim=-1)
-        # 与V相乘得到加权表示。
-        return torch.bmm(weights, v)
-
-
-class DeepARNetwork(nn.Module):
+class SquareNetNetwork(nn.Module):
 
     @validated()
     def __init__(
         self,
         input_size: int,
-        encoder_size: int,
+        decoder_size: int,
         num_layers: int,
         num_cells: int,
         cell_type: str,
-        short_period: int,
+        short_cycle: int,
         history_length: int,
         context_length: int,    # should be equal to the length of long period
         prediction_length: int,     # should be integer multiples of small period
@@ -64,7 +39,7 @@ class DeepARNetwork(nn.Module):
         self.num_layers = num_layers
         self.num_cells = num_cells
         self.cell_type = cell_type
-        self.short_period = short_period
+        self.short_cycle = short_cycle
         self.history_length = history_length
         self.context_length = context_length
         self.prediction_length = prediction_length
@@ -74,8 +49,8 @@ class DeepARNetwork(nn.Module):
         self.num_cat = len(cardinality)
         self.scaling = scaling
         self.dtype = dtype
-
-        self.lags_seq = lags_seq + [0]   # squarenet
+        # self.lags_seq = lags_seq + [0]   # 0 is the current value
+        self.lags_seq = [l - 1 for l in lags_seq]   # to distinguish with deepAR
 
         self.distr_output = distr_output
         rnn = {"LSTM": nn.LSTM, "GRU": nn.GRU}[self.cell_type]
@@ -89,22 +64,28 @@ class DeepARNetwork(nn.Module):
                 dropout=dropout_rate,
                 batch_first=True,
             )
-            for _ in range(self.context_length // self.short_period)
+            for _ in range(self.context_length // self.short_cycle)
         )
         # self.encoder = rnn(
-        #         input_size=input_size,
+        #         input_size=num_cells,
         #         hidden_size=num_cells,
         #         num_layers=num_layers,
         #         dropout=dropout_rate,
         #         batch_first=True,
         #     )
         self.decoder = rnn(
-            input_size=encoder_size,
+            input_size=decoder_size,
             hidden_size=num_cells,
             num_layers=num_layers,
             dropout=dropout_rate,
             batch_first=True,
         )
+
+        self.decoder_dnn = nn.ModuleList(nn.Sequential(
+            nn.Linear(decoder_size, 1),
+            # nn.ReLU()
+        ) for _ in range(self.prediction_length))
+
         self.out = nn.Linear(num_cells, 1)
         self.criterion = nn.MSELoss()    # l2, l1
 
@@ -228,22 +209,29 @@ class DeepARNetwork(nn.Module):
 
         # (batch_size, sub_seq_len, input_dim)
         inputs = torch.cat((input_lags, time_feat, repeated_static_feat), dim=-1)
-        # reshape (batch_size, long_period, short_period, input_dim)
-        inputs = inputs.reshape(inputs.shape[0], -1, self.short_period, inputs.shape[-1])
+        # reshape (batch_size, long_period, short_cycle, input_dim)
+        inputs = inputs.reshape(inputs.shape[0], -1, self.short_cycle, inputs.shape[-1])
 
         # unroll encoder
         encoder_out = torch.zeros(inputs.shape[0], inputs.shape[2], self.num_cells).to(inputs.device)
-        hn = torch.zeros(1, inputs.shape[0], self.num_cells).to(inputs.device)
-        cn = torch.zeros(1, inputs.shape[0], self.num_cells).to(inputs.device)
+        hn = torch.zeros(self.num_layers, inputs.shape[0], self.num_cells).to(inputs.device)
+        cn = torch.zeros(self.num_layers, inputs.shape[0], self.num_cells).to(inputs.device)
         for i in range(0, inputs.shape[1]):
             hv = self.long_cell(inputs[:, i, :, :].reshape(-1, inputs.shape[-1]),
                                 encoder_out.reshape(-1, self.num_cells))
-            hv = hv.reshape(inputs.shape[0], self.short_period, -1)
+            hv = hv.reshape(inputs.shape[0], self.short_cycle, -1)
             encoder_out, (hn, cn) = self.encoder[i](hv, (hn, cn))
-
-        # print(encoder_out.shape, time_feat[:, 24:, :].shape)
-        query = torch.cat((inputs[:, 0, :, :], encoder_out, future_time_feat, repeated_static_feat[:, -24:, :]), dim=-1)
+        # inputs[:, 0, :, :]
+        query = torch.cat((inputs[:, 0, :, :], hn.permute(1, 0, 2).repeat(1, self.prediction_length, 1),
+                           future_time_feat, repeated_static_feat[:, -self.prediction_length:, :]), dim=-1)
         outputs, state = self.decoder(query, (hn, cn))
+        # outputs, state = None, None
+        # for i in range(self.prediction_length):
+        #     if i == 0:
+        #         outputs = self.decoder_dnn[i](query[:, i, :]).unsqueeze(1)
+        #     else:
+        #         outputs = torch.cat([outputs, self.decoder_dnn[i](query[:, i, :]).unsqueeze(1)], dim=1)
+
         outputs = self.out(outputs)
         outputs = outputs * scale.unsqueeze(-1)
 
@@ -254,7 +242,7 @@ class DeepARNetwork(nn.Module):
         return outputs, state, scale, static_feat
 
 
-class DeepARTrainingNetwork(DeepARNetwork):
+class SquareNetTrainingNetwork(SquareNetNetwork):
     def distribution(
         self,
         feat_static_cat: torch.Tensor,
@@ -312,7 +300,7 @@ class DeepARTrainingNetwork(DeepARNetwork):
         return loss
 
 
-class DeepARPredictionNetwork(DeepARNetwork):
+class SquareNetPredictionNetwork(SquareNetNetwork):
     def __init__(self, num_parallel_samples: int = 100, **kwargs) -> None:
         super().__init__(**kwargs)
         self.num_parallel_samples = num_parallel_samples
